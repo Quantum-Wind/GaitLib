@@ -44,45 +44,52 @@ binaries can only be built on those OSes, which CI handles. Warnings are errors.
 
 ## How the vendordep is distributed
 
-GaitLib is a normal WPILib vendordep, but it isn't hosted anywhere. Its Maven
-artifacts are committed into the robot project's git repo next to the JSON:
+GaitLib is a normal WPILib vendordep whose Maven artifacts live in this repo's
+private GitHub Packages registry (`https://maven.pkg.github.com/Quantum-Wind/Gait`).
 
-```
-<robot project>/
-  vendordeps/GaitLib.json          "mavenUrls": ["libs/maven"]   (relative to the robot project)
-  libs/maven/com/quantumwind/gaitlib-cpp/<version>/...
-```
-
-No tokens or network access to our repo are needed, and builds work offline at
-events.
-
-**Releases:** CI builds every platform on each push. Pushing a tag like `v0.1.0`
-creates a GitHub release with `GaitLib-0.1.0.zip`. Unzip it in the root of the
-robot project and commit `vendordeps/GaitLib.json` and `libs/maven`. Untagged
-builds produce the same zip as a workflow artifact.
-
-**Local development:** publish what this machine can build straight into a
-robot project checkout:
-
-```bash
-./gradlew publishVendordep -ProbotProject=../Robot -PgaitlibVersion=0.1.0-dev
-```
-
-Old versions under `libs/maven/com/quantumwind/gaitlib-cpp/` can be deleted once
-the JSON no longer points at them.
+- **Pull requests** build and test every platform. Nothing is published.
+- **Every push to `main`** publishes `com.quantumwind:gaitlib-cpp:<gaitlibVersionBase>.<CI run number>`
+  (e.g. `0.1.57`) and creates a GitHub release `v0.1.57` with the matching `GaitLib.json`.
+  Bump `gaitlibVersionBase` in `gradle.properties` for breaking changes.
+- **Local builds** are versioned `<gaitlibVersionBase>-local` and never published by CI.
 
 ## Using GaitLib in a robot project
 
-1. Install the vendordep as above.
-2. Add this to the robot project's `build.gradle`. Otherwise GradleRIO also asks
-   WPI's public vendor mirror for `com.quantumwind` artifacts, which can stall the
-   build for a long time:
+1. Download `GaitLib.json` from the latest GitHub release into the robot project's
+   `vendordeps/`. To upgrade later, grab a newer release's JSON (or edit both
+   `version` fields).
+2. GitHub Packages requires a login even to read, and GradleRIO doesn't pass
+   credentials for vendordep repositories, so add this to the robot project's
+   `build.gradle`:
 
    ```groovy
+   // Log in to GaitLib's GitHub Packages registry (declared in vendordeps/GaitLib.json).
+   repositories.withType(MavenArtifactRepository).configureEach { repo ->
+       if (repo.url.toString().startsWith('https://maven.pkg.github.com/Quantum-Wind/')) {
+           repo.credentials {
+               username = project.findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
+               password = project.findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')
+           }
+       }
+   }
+
+   // Don't ask WPI's public vendor mirror for com.quantumwind artifacts; that lookup
+   // can stall the build for a long time.
    wpi.maven.useFrcMavenVendorCache = false
    ```
 
-3. Use it:
+3. Each developer adds a GitHub personal access token (classic) with the
+   `read:packages` scope to `~/.gradle/gradle.properties`:
+
+   ```properties
+   gpr.user=<github username>
+   gpr.key=<token>
+   ```
+
+   For the robot repo's own CI, its `GITHUB_TOKEN` works once this package grants
+   that repo read access (package settings -> "Manage Actions access").
+
+4. Use it:
 
    ```cpp
    #include <gaitlib/CvtSwerveModule.h>
@@ -97,6 +104,13 @@ the JSON no longer points at them.
    module.Periodic();
    module.SetDesiredState(state);
    ```
+
+### Trying unreleased changes
+
+Run `./gradlew publishToMavenLocal` here, set both `version` fields in the robot
+project's `GaitLib.json` to `<gaitlibVersionBase>-local` (e.g. `0.1-local`), and
+add `repositories { mavenLocal() }` to the robot project's `build.gradle`.
+Undo both before committing robot code.
 
 To bump the WPILib version, change `wpilibVersion` in `gradle.properties`, the
 plugin versions in `build.gradle`, and `frcYear` in `consumer/GaitLib.json`.

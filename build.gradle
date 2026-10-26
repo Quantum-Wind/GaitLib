@@ -9,7 +9,9 @@ plugins {
 }
 
 group = gaitlibGroup
-version = gaitlibVersion
+version = project.hasProperty('buildNumber')
+        ? "${gaitlibVersionBase}.${project.property('buildNumber')}"
+        : "${gaitlibVersionBase}-local"
 
 repositories {
     mavenCentral()

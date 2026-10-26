@@ -5,7 +5,7 @@
     "frcYear": "2026",
     "uuid": "e467a5a8-e046-4cef-9e5b-7efaa23098c4",
     "mavenUrls": [
-        "libs/maven"
+        "${mavenUrl}"
     ],
     "jsonUrl": "",
     "javaDependencies": [],

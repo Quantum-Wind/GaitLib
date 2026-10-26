@@ -1,10 +1,7 @@
 apply plugin: 'maven-publish'
 
-// GaitLib ships as a vendordep that lives inside the robot project's git repo:
-//
-//   <robot project>/
-//     vendordeps/GaitLib.json        "mavenUrls": ["libs/maven"]  (relative to the robot project)
-//     libs/maven/com/quantumwind/gaitlib-cpp/<version>/...
+// GaitLib ships as a vendordep: GaitLib.json in the robot project's vendordeps/ points GradleRIO
+// at the private GitHub Packages registry below, which CI publishes to on every push to main.
 //
 // Maven layout (what GradleRIO's native dependency resolver expects):
 //   com.quantumwind:gaitlib-cpp:<version>
@@ -15,12 +12,7 @@ apply plugin: 'maven-publish'
 def artifactBase = 'gaitlib-cpp'
 def outputsFolder = file("$buildDir/outputs")
 def licenseFile = file("$rootDir/LICENSE")
-
-// Where publishVendordep writes. Pass -ProbotProject=<path> to install straight into a robot
-// project; otherwise it builds the same layout under build/vendordep (zipped for releases).
-def vendordepRoot = project.hasProperty('robotProject')
-        ? file(project.property('robotProject'))
-        : file("$buildDir/vendordep")
+def githubPackagesUrl = 'https://maven.pkg.github.com/Quantum-Wind/Gait'
 
 task cppHeadersZip(type: Zip) {
     destinationDirectory = outputsFolder
@@ -49,7 +41,8 @@ task vendordepJson(type: Copy) {
     group = 'publishing'
     from 'consumer/GaitLib.json'
     into "$buildDir/generated/vendordep"
-    def props = [version: project.version.toString(), groupId: project.group.toString(), artifactId: artifactBase]
+    def props = [version: project.version.toString(), groupId: project.group.toString(),
+                 artifactId: artifactBase, mavenUrl: githubPackagesUrl]
     inputs.properties(props)
     expand(props)
 }
@@ -97,31 +90,17 @@ ext.createPlatformZipTasks = { components ->
 
 publishing {
     repositories {
+        // Credentials come from GITHUB_ACTOR/GITHUB_TOKEN (CI) or gpr.user/gpr.key in
+        // ~/.gradle/gradle.properties. Only CI is expected to publish here.
         maven {
-            name = 'Vendordep'
-            url = new File(vendordepRoot, 'libs/maven').toURI()
+            name = 'GitHubPackages'
+            url = githubPackagesUrl
+            credentials {
+                username = System.getenv('GITHUB_ACTOR') ?: project.findProperty('gpr.user')
+                password = System.getenv('GITHUB_TOKEN') ?: project.findProperty('gpr.key')
+            }
         }
     }
-}
-
-task installVendordepJson(type: Copy) {
-    from vendordepJson
-    into new File(vendordepRoot, 'vendordeps')
-}
-
-task publishVendordep {
-    description = 'Publishes GaitLib (Maven artifacts + GaitLib.json) into -ProbotProject, or build/vendordep.'
-    group = 'publishing'
-    dependsOn 'publishCppPublicationToVendordepRepository', installVendordepJson
-}
-
-task vendordepZip(type: Zip) {
-    description = 'Zips build/vendordep for a release: unzip it in the root of a robot project.'
-    group = 'publishing'
-    dependsOn publishVendordep
-    destinationDirectory = file("$buildDir/release")
-    archiveFileName = "GaitLib-${project.version}.zip"
-    from vendordepRoot
 }
 
 // CI builds each platform on a different runner, then a final job downloads every zip into
