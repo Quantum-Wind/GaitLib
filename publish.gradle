@@ -1,7 +1,8 @@
 apply plugin: 'maven-publish'
 
 // GaitLib ships as a vendordep: GaitLib.json in the robot project's vendordeps/ points GradleRIO
-// at the private GitHub Packages registry below, which CI publishes to on every push to main.
+// at a public static Maven repo served by GitHub Pages from this repo's `maven` branch. CI publishes
+// into a checkout of that branch (-PmavenRepoDir) and pushes it on every push to main.
 //
 // Maven layout (what GradleRIO's native dependency resolver expects):
 //   com.quantumwind:gaitlib-cpp:<version>
@@ -12,7 +13,8 @@ apply plugin: 'maven-publish'
 def artifactBase = 'gaitlib-cpp'
 def outputsFolder = file("$buildDir/outputs")
 def licenseFile = file("$rootDir/LICENSE")
-def githubPackagesUrl = 'https://maven.pkg.github.com/Quantum-Wind/GaitLib'
+def mavenUrl = 'https://quantum-wind.github.io/GaitLib'
+def mavenRepoDir = project.findProperty('mavenRepoDir') ?: "$buildDir/maven-repo"
 
 task cppHeadersZip(type: Zip) {
     destinationDirectory = outputsFolder
@@ -42,7 +44,7 @@ task vendordepJson(type: Copy) {
     from 'consumer/GaitLib.json'
     into "$buildDir/generated/vendordep"
     def props = [version: project.version.toString(), groupId: project.group.toString(),
-                 artifactId: artifactBase, mavenUrl: githubPackagesUrl]
+                 artifactId: artifactBase, mavenUrl: mavenUrl]
     inputs.properties(props)
     expand(props)
 }
@@ -90,15 +92,11 @@ ext.createPlatformZipTasks = { components ->
 
 publishing {
     repositories {
-        // Credentials come from GITHUB_ACTOR/GITHUB_TOKEN (CI) or gpr.user/gpr.key in
-        // ~/.gradle/gradle.properties. Only CI is expected to publish here.
+        // A plain directory laid out as a Maven repo. Publishing into an existing checkout keeps
+        // earlier versions and merges this one into maven-metadata.xml.
         maven {
-            name = 'GitHubPackages'
-            url = githubPackagesUrl
-            credentials {
-                username = System.getenv('GITHUB_ACTOR') ?: project.findProperty('gpr.user')
-                password = System.getenv('GITHUB_TOKEN') ?: project.findProperty('gpr.key')
-            }
+            name = 'Site'
+            url = file(mavenRepoDir)
         }
     }
 }

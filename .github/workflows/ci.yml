@@ -99,8 +99,9 @@ jobs:
           path: build/outputs/*.zip
 
   # Pushes to main: combine every platform into one Maven publication,
-  # com.quantumwind:gaitlib-cpp:<gaitlibVersionBase>.<run number>, publish it to GitHub Packages,
-  # and attach the matching GaitLib.json to a GitHub release.
+  # com.quantumwind:gaitlib-cpp:<gaitlibVersionBase>.<run number>, add it to the public Maven repo
+  # on the `maven` branch (served by GitHub Pages at https://quantum-wind.github.io/GaitLib), and
+  # attach the matching GaitLib.json to a GitHub release.
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-docker, build-host, coverage]
@@ -109,7 +110,6 @@ jobs:
     concurrency: publish
     permissions:
       contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -136,13 +136,29 @@ jobs:
             [ -f "combined/gaitlib-cpp-$extra.zip" ] || { echo "::error::missing gaitlib-cpp-$extra.zip"; missing=1; }
           done
           exit $missing
-      - name: Publish to GitHub Packages
+      # The `maven` branch holds every published version. The first run creates it.
+      - name: Check out the Maven repo
+        run: |
+          if git fetch --depth=1 origin maven; then
+            git worktree add -B maven maven-repo FETCH_HEAD
+          else
+            git worktree add --orphan -b maven maven-repo
+          fi
+          touch maven-repo/.nojekyll
+      - name: Publish to the Maven repo
         run: >
-          ./gradlew publishCppPublicationToGitHubPackagesRepository vendordepJson
+          ./gradlew publishCppPublicationToSiteRepository vendordepJson
           -PcombinedDir="$GITHUB_WORKSPACE/combined"
+          -PmavenRepoDir="$GITHUB_WORKSPACE/maven-repo"
           -PbuildNumber=${{ github.run_number }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the Maven repo
+        working-directory: maven-repo
+        run: |
+          git add -A
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "gaitlib-cpp ${{ github.run_number }} from ${GITHUB_SHA::7}"
+          git push origin maven
       - name: Create release
         run: |
           json=build/generated/vendordep/GaitLib.json

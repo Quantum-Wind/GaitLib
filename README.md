@@ -57,13 +57,14 @@ locally (Linux, needs [gcovr](https://gcovr.com)):
 
 ## How the vendordep is distributed
 
-GaitLib is a normal WPILib vendordep whose Maven artifacts live in this repo's
-private GitHub Packages registry (`https://maven.pkg.github.com/Quantum-Wind/GaitLib`).
+GaitLib is a normal WPILib vendordep whose Maven artifacts live in a public, static Maven
+repo: the `maven` branch of this repo, served by GitHub Pages at
+`https://quantum-wind.github.io/GaitLib`. Anyone can download from it without credentials.
 
 - **Pull requests** build and test every platform. Nothing is published.
 - **Every push to `main`** publishes `com.quantumwind:gaitlib-cpp:<gaitlibVersionBase>.<CI run number>`
-  (e.g. `0.1.57`) and creates a GitHub release `v0.1.57` with the matching `GaitLib.json`.
-  Bump `gaitlibVersionBase` in `gradle.properties` for breaking changes.
+  (e.g. `0.1.57`) to the `maven` branch and creates a GitHub release `v0.1.57` with the
+  matching `GaitLib.json`. Bump `gaitlibVersionBase` in `gradle.properties` for breaking changes.
 - **Local builds** are versioned `<gaitlibVersionBase>-local` and never published by CI.
 
 ## Using GaitLib in a robot project
@@ -71,38 +72,14 @@ private GitHub Packages registry (`https://maven.pkg.github.com/Quantum-Wind/Gai
 1. Download `GaitLib.json` from the latest GitHub release into the robot project's
    `vendordeps/`. To upgrade later, grab a newer release's JSON (or edit both
    `version` fields).
-2. GitHub Packages requires a login even to read, and GradleRIO doesn't pass
-   credentials for vendordep repositories, so add this to the robot project's
-   `build.gradle`:
+2. Optional: GradleRIO checks WPI's vendor mirror first, which doesn't carry GaitLib.
+   If dependency resolution is slow, turn that off in the robot project's `build.gradle`:
 
    ```groovy
-   // Log in to GaitLib's GitHub Packages registry (declared in vendordeps/GaitLib.json).
-   repositories.withType(MavenArtifactRepository).configureEach { repo ->
-       if (repo.url.toString().startsWith('https://maven.pkg.github.com/Quantum-Wind/')) {
-           repo.credentials {
-               username = project.findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
-               password = project.findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')
-           }
-       }
-   }
-
-   // Don't ask WPI's public vendor mirror for com.quantumwind artifacts; that lookup
-   // can stall the build for a long time.
    wpi.maven.useFrcMavenVendorCache = false
    ```
 
-3. Each developer adds a GitHub personal access token (classic) with the
-   `read:packages` scope to `~/.gradle/gradle.properties`:
-
-   ```properties
-   gpr.user=<github username>
-   gpr.key=<token>
-   ```
-
-   For the robot repo's own CI, its `GITHUB_TOKEN` works once this package grants
-   that repo read access (package settings -> "Manage Actions access").
-
-4. Use it:
+3. Use it:
 
    ```cpp
    #include <gaitlib/CvtSwerveModule.h>
