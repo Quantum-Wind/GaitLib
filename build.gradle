@@ -76,7 +76,9 @@ tasks.register('rootCompileCommands') {
     def src = layout.buildDirectory.file("TargetedCompileCommands/${desktopPlatform}debug/compile_commands.json")
     def dst = layout.projectDirectory.file('compile_commands.json')
     dependsOn 'generateCompileCommands'
-    inputs.file(src)
+    // Builds limited to cross targets (-Ponlylinuxathena etc.) have no desktop compile commands.
+    onlyIf { src.get().asFile.exists() }
+    inputs.files(src)
     outputs.file(dst)
     doLast {
         java.nio.file.Files.copy(src.get().asFile.toPath(), dst.asFile.toPath(),
