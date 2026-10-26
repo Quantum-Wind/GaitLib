@@ -1,0 +1,34 @@
+{
+    "fileName": "GaitLib.json",
+    "name": "GaitLib",
+    "version": "${version}",
+    "frcYear": "2026",
+    "uuid": "e467a5a8-e046-4cef-9e5b-7efaa23098c4",
+    "mavenUrls": [
+        "libs/maven"
+    ],
+    "jsonUrl": "",
+    "javaDependencies": [],
+    "jniDependencies": [],
+    "cppDependencies": [
+        {
+            "groupId": "${groupId}",
+            "artifactId": "${artifactId}",
+            "version": "${version}",
+            "libName": "GaitLib",
+            "headerClassifier": "headers",
+            "sourcesClassifier": "sources",
+            "sharedLibrary": false,
+            "skipInvalidPlatforms": true,
+            "binaryPlatforms": [
+                "linuxathena",
+                "linuxarm32",
+                "linuxarm64",
+                "linuxx86-64",
+                "windowsx86-64",
+                "windowsarm64",
+                "osxuniversal"
+            ]
+        }
+    ]
+}

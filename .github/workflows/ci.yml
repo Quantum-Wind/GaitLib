@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  validation:
+    name: Validate Gradle wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/actions/wrapper-validation@v4
+
+  # Linux targets build inside WPILib's toolchain containers.
+  build-docker:
+    needs: [validation]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - container: wpilib/roborio-cross-ubuntu:2025-22.04
+            artifact-name: roborio
+            build-options: -Ponlylinuxathena
+          - container: wpilib/raspbian-cross-ubuntu:bookworm-22.04
+            artifact-name: linuxarm32
+            build-options: -Ponlylinuxarm32
+          - container: wpilib/aarch64-cross-ubuntu:bookworm-22.04
+            artifact-name: linuxarm64
+            build-options: -Ponlylinuxarm64
+          - container: wpilib/ubuntu-base:22.04
+            artifact-name: linuxx86-64
+            build-options: ''
+    name: Build - ${{ matrix.artifact-name }}
+    runs-on: ubuntu-22.04
+    container: ${{ matrix.container }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: ./gradlew build ${{ matrix.build-options }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaitlib-${{ matrix.artifact-name }}
+          path: build/outputs/*.zip
+
+  # Windows (x86-64 + arm64) and macOS (universal) build on native runners.
+  build-host:
+    needs: [validation]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            artifact-name: windows
+            architecture: x64
+          - os: macos-14
+            artifact-name: macos
+            architecture: aarch64
+    name: Build - ${{ matrix.artifact-name }}
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: 13.3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          architecture: ${{ matrix.architecture }}
+      - name: Build and test
+        shell: bash
+        run: ./gradlew build -Pbuildalldesktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaitlib-${{ matrix.artifact-name }}
+          path: build/outputs/*.zip
+
+  # Every push: combine all platforms into the vendordep layout and keep it as a workflow artifact.
+  # Tags (v1.2.3): also attach GaitLib-1.2.3.zip to a GitHub release.
+  vendordep:
+    needs: [build-docker, build-host]
+    name: Package vendordep
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gaitlib-*
+          path: combined
+          merge-multiple: true
+      - name: Set version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "GAITLIB_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "GAITLIB_VERSION=0.0.0-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+      - name: Build vendordep zip
+        run: >
+          ./gradlew vendordepZip
+          -PcombinedDir="$GITHUB_WORKSPACE/combined"
+          -PgaitlibVersion="$GAITLIB_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GaitLib-${{ env.GAITLIB_VERSION }}
+          path: build/release/GaitLib-${{ env.GAITLIB_VERSION }}.zip
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: gh release create "$GITHUB_REF_NAME" "build/release/GaitLib-$GAITLIB_VERSION.zip" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

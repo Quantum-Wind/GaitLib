@@ -1,0 +1,75 @@
+import edu.wpi.first.toolchain.*
+
+plugins {
+    id 'cpp'
+    id 'google-test'
+    id 'edu.wpi.first.wpilib.repositories.WPILibRepositoriesPlugin' version '2025.0'
+    id 'edu.wpi.first.NativeUtils' version '2026.0.1'
+    id 'edu.wpi.first.GradleVsCode' version '2.1.0'
+}
+
+group = gaitlibGroup
+version = gaitlibVersion
+
+repositories {
+    mavenCentral()
+}
+wpilibRepositories.addAllReleaseRepositories(project)
+
+// Toolchains, platforms, and WPILib dependency versions
+apply from: 'config.gradle'
+
+nativeUtils {
+    exportsConfigs {
+        // Export every symbol from the shared build (needed for Windows DLLs)
+        GaitLib {
+        }
+    }
+}
+
+def desktopPlatform = NativePlatforms.desktop
+
+model {
+    components {
+        GaitLib(NativeLibrarySpec) {
+            sources {
+                cpp {
+                    source {
+                        srcDirs 'src/main/native/cpp'
+                        include '**/*.cpp'
+                    }
+                    exportedHeaders {
+                        srcDirs 'src/main/native/include'
+                    }
+                }
+            }
+            nativeUtils.useRequiredLibrary(it, 'wpilib_shared')
+        }
+    }
+    testSuites {
+        // The google-test plugin creates GaitLibTest for the GaitLib component; this configures it.
+        GaitLibTest {
+            sources.cpp {
+                source {
+                    srcDir 'src/test/native/cpp'
+                    include '**/*.cpp'
+                }
+            }
+
+            binaries.all {
+                // Only run the tests on the machine doing the build
+                if (it.targetPlatform.name != desktopPlatform || it.buildType.name != 'debug') {
+                    it.buildable = false
+                }
+            }
+
+            nativeUtils.useRequiredLibrary(it, 'wpilib_executable_shared', 'googletest_static')
+        }
+    }
+}
+
+apply from: 'publish.gradle'
+
+wrapper {
+    gradleVersion = '8.14.3'
+}

@@ -1,0 +1,157 @@
+apply plugin: 'maven-publish'
+
+// GaitLib ships as a vendordep that lives inside the robot project's git repo:
+//
+//   <robot project>/
+//     vendordeps/GaitLib.json        "mavenUrls": ["libs/maven"]  (relative to the robot project)
+//     libs/maven/com/quantumwind/gaitlib-cpp/<version>/...
+//
+// Maven layout (what GradleRIO's native dependency resolver expects):
+//   com.quantumwind:gaitlib-cpp:<version>
+//     classifier headers                     -> public headers
+//     classifier sources                     -> sources (for debugging)
+//     classifier <platform>[static][debug]   -> one zip per platform/linkage/build type,
+//                                               e.g. linuxathenastatic, windowsx86-64staticdebug
+def artifactBase = 'gaitlib-cpp'
+def outputsFolder = file("$buildDir/outputs")
+def licenseFile = file("$rootDir/LICENSE")
+
+// Where publishVendordep writes. Pass -ProbotProject=<path> to install straight into a robot
+// project; otherwise it builds the same layout under build/vendordep (zipped for releases).
+def vendordepRoot = project.hasProperty('robotProject')
+        ? file(project.property('robotProject'))
+        : file("$buildDir/vendordep")
+
+task cppHeadersZip(type: Zip) {
+    destinationDirectory = outputsFolder
+    archiveBaseName = artifactBase
+    archiveVersion = ''
+    archiveClassifier = 'headers'
+
+    from(licenseFile)
+    from('src/main/native/include')
+}
+
+task cppSourceZip(type: Zip) {
+    destinationDirectory = outputsFolder
+    archiveBaseName = artifactBase
+    archiveVersion = ''
+    archiveClassifier = 'sources'
+
+    from(licenseFile)
+    from('src/main/native/cpp')
+}
+
+build.dependsOn cppHeadersZip, cppSourceZip
+
+task vendordepJson(type: Copy) {
+    description = 'Generates GaitLib.json with this build\'s version.'
+    group = 'publishing'
+    from 'consumer/GaitLib.json'
+    into "$buildDir/generated/vendordep"
+    def props = [version: project.version.toString(), groupId: project.group.toString(), artifactId: artifactBase]
+    inputs.properties(props)
+    expand(props)
+}
+
+build.dependsOn vendordepJson
+
+// One zip per buildable platform/linkage/build type of the GaitLib component.
+ext.createPlatformZipTasks = { components ->
+    def tasksByClassifier = [:]
+    components.each { component ->
+        if (!(component in NativeLibrarySpec) || component.name != 'GaitLib') return
+        component.binaries.each { binary ->
+            if (!binary.buildable) return
+            def classifier = nativeUtils.getPublishClassifier(binary)
+            def zipTask = tasksByClassifier[classifier]
+            if (zipTask == null) {
+                zipTask = project.tasks.create("${artifactBase}-${classifier}", Zip) {
+                    description = "Creates the GaitLib archive for ${classifier}"
+                    destinationDirectory = outputsFolder
+                    archiveBaseName = artifactBase
+                    archiveVersion = ''
+                    archiveClassifier = classifier
+                    duplicatesStrategy = 'exclude'
+                    from(licenseFile)
+                }
+                tasksByClassifier[classifier] = zipTask
+                project.build.dependsOn zipTask
+            }
+            def platformPath = nativeUtils.getPlatformPath(binary)
+            if (binary instanceof SharedLibraryBinarySpec) {
+                zipTask.dependsOn binary.tasks.link
+                zipTask.from(binary.sharedLibraryFile) { into "${platformPath}/shared" }
+                zipTask.from(binary.sharedLibraryLinkFile) { into "${platformPath}/shared" }
+                zipTask.from(new File(binary.sharedLibraryFile.absolutePath + '.debug')) { into "${platformPath}/shared" }
+                def sharedPath = binary.sharedLibraryFile.absolutePath
+                zipTask.from(new File(sharedPath.substring(0, sharedPath.lastIndexOf('.')) + '.pdb')) { into "${platformPath}/shared" }
+            } else if (binary instanceof StaticLibraryBinarySpec) {
+                zipTask.dependsOn binary.tasks.createStaticLib
+                zipTask.from(binary.staticLibraryFile) { into "${platformPath}/static" }
+            }
+        }
+    }
+    return tasksByClassifier.values()
+}
+
+publishing {
+    repositories {
+        maven {
+            name = 'Vendordep'
+            url = new File(vendordepRoot, 'libs/maven').toURI()
+        }
+    }
+}
+
+task installVendordepJson(type: Copy) {
+    from vendordepJson
+    into new File(vendordepRoot, 'vendordeps')
+}
+
+task publishVendordep {
+    description = 'Publishes GaitLib (Maven artifacts + GaitLib.json) into -ProbotProject, or build/vendordep.'
+    group = 'publishing'
+    dependsOn 'publishCppPublicationToVendordepRepository', installVendordepJson
+}
+
+task vendordepZip(type: Zip) {
+    description = 'Zips build/vendordep for a release: unzip it in the root of a robot project.'
+    group = 'publishing'
+    dependsOn publishVendordep
+    destinationDirectory = file("$buildDir/release")
+    archiveFileName = "GaitLib-${project.version}.zip"
+    from vendordepRoot
+}
+
+// CI builds each platform on a different runner, then a final job downloads every zip into
+// one directory and publishes them together with -PcombinedDir=<dir>. Without it, the publication
+// contains whatever this machine can build.
+def combinedDir = project.findProperty('combinedDir')
+
+model {
+    publishing {
+        def platformZips = createPlatformZipTasks($.components)
+        publications {
+            cpp(MavenPublication) {
+                groupId = project.group
+                artifactId = artifactBase
+                version = project.version
+
+                if (combinedDir != null) {
+                    fileTree(combinedDir) { include "${artifactBase}-*.zip" }.each { zip ->
+                        def zipClassifier = zip.name - "${artifactBase}-" - '.zip'
+                        artifact(zip) {
+                            classifier = zipClassifier
+                            extension = 'zip'
+                        }
+                    }
+                } else {
+                    platformZips.each { artifact it }
+                    artifact cppHeadersZip
+                    artifact cppSourceZip
+                }
+            }
+        }
+    }
+}
