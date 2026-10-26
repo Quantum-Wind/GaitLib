@@ -49,6 +49,18 @@ TEST(CvtKinematicsTest, PowerBandRatioIgnoresDirection) {
                    PowerBandRatio(2_mps, config));
 }
 
+TEST(CvtKinematicsTest, ClampCvtRatioBoundsToRange) {
+  CvtSwerveModuleConfig config;
+  EXPECT_DOUBLE_EQ(ClampCvtRatio(0.0, config), config.minCvtRatio);
+  EXPECT_DOUBLE_EQ(ClampCvtRatio(1.0, config), 1.0);
+  EXPECT_DOUBLE_EQ(ClampCvtRatio(10.0, config), config.maxCvtRatio);
+}
+
+TEST(CvtKinematicsTest, DefaultPolicyIsPowerBand) {
+  CvtSwerveModuleConfig config;
+  EXPECT_DOUBLE_EQ(SelectCvtRatio(3_mps, config), PowerBandRatio(3_mps, config));
+}
+
 TEST(CvtKinematicsTest, CustomPolicyIsClamped) {
   CvtSwerveModuleConfig config;
   config.ratioPolicy = [](units::meters_per_second_t) { return 1000.0; };

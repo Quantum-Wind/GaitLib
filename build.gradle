@@ -72,6 +72,83 @@ model {
 
 apply from: 'publish.gradle'
 
+tasks.register('rootCompileCommands') {
+    def src = layout.buildDirectory.file("TargetedCompileCommands/${desktopPlatform}debug/compile_commands.json")
+    def dst = layout.projectDirectory.file('compile_commands.json')
+    dependsOn 'generateCompileCommands'
+    inputs.file(src)
+    outputs.file(dst)
+    doLast {
+        java.nio.file.Files.copy(src.get().asFile.toPath(), dst.asFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+}
+tasks.named('build') { dependsOn 'rootCompileCommands' }
+
+// Every source file has exactly one test file at the mirrored path:
+//   src/main/native/cpp/sim/ModuleIOSim.cpp <-> src/test/native/cpp/sim/ModuleIOSimTest.cpp
+// main.cpp (the GoogleTest entry point) is the only test file without a source.
+def mainSourceDir = file('src/main/native/cpp')
+def testSourceDir = file('src/test/native/cpp')
+def checkTestMirror = tasks.register('checkTestMirror') {
+    group = 'verification'
+    description = 'Fails unless src/test/native/cpp mirrors src/main/native/cpp one-to-one.'
+    inputs.dir(mainSourceDir)
+    inputs.dir(testSourceDir)
+    outputs.upToDateWhen { true }
+    doLast {
+        def relative = { File root -> fileTree(root) { include '**/*.cpp' }.files
+                .collect { root.toPath().relativize(it.toPath()).toString().replace('\\', '/') } as Set }
+        def expected = relative(mainSourceDir).collect { it.replaceAll(/\.cpp$/, 'Test.cpp') } as Set
+        def actual = relative(testSourceDir) - 'main.cpp'
+        def missing = (expected - actual).sort()
+        def orphaned = (actual - expected).sort()
+        if (missing || orphaned) {
+            def lines = missing.collect { "  missing test:  src/test/native/cpp/$it" } +
+                    orphaned.collect { "  orphaned test: src/test/native/cpp/$it (no matching source)" }
+            throw new GradleException("Test tree does not mirror src/main/native/cpp:\n" + lines.join('\n'))
+        }
+    }
+}
+tasks.named('check') { dependsOn checkTestMirror }
+
+// `./gradlew coverage` builds the desktop debug binaries with gcov instrumentation, runs the unit
+// tests, and fails unless gcovr (settings in gcovr.cfg) reports 100% coverage of src/main/native.
+// Instrumentation is only added when the coverage task is requested, so it never ships in a build.
+def desktopTestRunTask = "runGaitLibTest${desktopPlatform.capitalize()}DebugGoogleTestExe"
+def coverageRequested = gradle.startParameter.taskNames.any { it == 'coverage' || it.endsWith(':coverage') }
+if (coverageRequested) {
+    model {
+        binaries {
+            withType(NativeBinarySpec).all {
+                if (it.targetPlatform.name == desktopPlatform && it.buildType.name == 'debug') {
+                    it.cppCompiler.args '--coverage'
+                    it.linker.args '--coverage'
+                }
+            }
+        }
+    }
+}
+
+tasks.register('coverage', Exec) {
+    group = 'verification'
+    description = 'Runs the unit tests with gcov and enforces 100% coverage (requires gcovr, Linux/GCC).'
+    dependsOn checkTestMirror, tasks.matching { it.name == desktopTestRunTask }
+    workingDir = projectDir
+    commandLine 'gcovr', '--config', 'gcovr.cfg'
+    doFirst { layout.buildDirectory.dir('reports/coverage').get().asFile.mkdirs() }
+}
+
+if (coverageRequested) {
+    tasks.matching { it.name == desktopTestRunTask }.configureEach { runTask ->
+        // Always rerun from zeroed counters so stale .gcda files can't inflate the result.
+        runTask.outputs.upToDateWhen { false }
+        runTask.doFirst {
+            fileTree(layout.buildDirectory) { include '**/*.gcda' }.each { it.delete() }
+        }
+    }
+}
+
 wrapper {
     gradleVersion = '8.14.3'
 }

@@ -12,7 +12,7 @@ apply plugin: 'maven-publish'
 def artifactBase = 'gaitlib-cpp'
 def outputsFolder = file("$buildDir/outputs")
 def licenseFile = file("$rootDir/LICENSE")
-def githubPackagesUrl = 'https://maven.pkg.github.com/Quantum-Wind/Gait'
+def githubPackagesUrl = 'https://maven.pkg.github.com/Quantum-Wind/GaitLib'
 
 task cppHeadersZip(type: Zip) {
     destinationDirectory = outputsFolder

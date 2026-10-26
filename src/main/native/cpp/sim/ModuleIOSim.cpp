@@ -16,16 +16,19 @@ namespace gaitlib::sim {
 
 namespace {
 constexpr units::volt_t kMaxVoltage = 12_V;
+
+frc::sim::DCMotorSim MakeSteerSim(const ModuleIOSimConstants& constants) {
+  auto plant = frc::LinearSystemId::DCMotorSystem(
+      constants.steerMotor, constants.steerInertia, constants.steerReduction);
+  return frc::sim::DCMotorSim{plant, constants.steerMotor};
+}
 }  // namespace
 
 ModuleIOSim::ModuleIOSim(const CvtSwerveModuleConfig& config,
                          const ModuleIOSimConstants& constants)
     : m_config{config},
       m_constants{constants},
-      m_steerSim{frc::LinearSystemId::DCMotorSystem(constants.steerMotor,
-                                                    constants.steerInertia,
-                                                    constants.steerReduction),
-                 constants.steerMotor},
+      m_steerSim{MakeSteerSim(constants)},
       m_steerController{constants.steerKp, 0.0, 0.0},
       m_cvtRatio{config.maxCvtRatio},
       m_cvtSetpoint{config.maxCvtRatio} {
@@ -42,9 +45,10 @@ void ModuleIOSim::UpdateInputs(ModuleIOInputs& inputs) {
         m_constants.driveKp * (m_driveSetpoint - m_driveMotorVelocity).value()};
     m_driveVoltage = feedforward + feedback;
 
-    m_steerVoltage = units::volt_t{m_steerController.Calculate(
-        m_steerSim.GetAngularPosition().value(),
-        m_steerSetpoint.Radians().value())};
+    double steerPosition = m_steerSim.GetAngularPosition().value();
+    double steerSetpoint = m_steerSetpoint.Radians().value();
+    m_steerVoltage = units::volt_t{
+        m_steerController.Calculate(steerPosition, steerSetpoint)};
   }
   m_driveVoltage = std::clamp(m_driveVoltage, -kMaxVoltage, kMaxVoltage);
   m_steerVoltage = std::clamp(m_steerVoltage, -kMaxVoltage, kMaxVoltage);

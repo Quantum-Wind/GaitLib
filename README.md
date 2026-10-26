@@ -16,7 +16,7 @@ src/main/native/include/gaitlib/  public headers (what robot code includes)
   ModuleIO.h                      hardware interface (implemented in the robot project)
   sim/ModuleIOSim.h               physics simulation of the module
 src/main/native/cpp/              implementation
-src/test/native/cpp/              GoogleTest unit tests (run on desktop)
+src/test/native/cpp/              GoogleTest unit tests (run on desktop), mirroring src/main/native/cpp
 consumer/GaitLib.json             vendordep descriptor template
 ```
 
@@ -42,10 +42,23 @@ does not run on newer JDKs) and a host C++ compiler for desktop builds.
 Cross targets whose toolchain isn't installed are skipped. Windows and macOS
 binaries can only be built on those OSes, which CI handles. Warnings are errors.
 
+## Tests
+
+`src/test/native/cpp` mirrors `src/main/native/cpp` one-to-one: `cpp/sim/ModuleIOSim.cpp`
+is tested by `src/test/native/cpp/sim/ModuleIOSimTest.cpp`. `./gradlew check` (and so
+`build`) fails on a missing or orphaned test file. `main.cpp` is the only extra test file.
+
+CI requires 100% line, function, and branch coverage of `src/main/native`. To run the same gate
+locally (Linux, needs [gcovr](https://gcovr.com)):
+
+```bash
+./gradlew coverage                  # report: build/reports/coverage/index.html
+```
+
 ## How the vendordep is distributed
 
 GaitLib is a normal WPILib vendordep whose Maven artifacts live in this repo's
-private GitHub Packages registry (`https://maven.pkg.github.com/Quantum-Wind/Gait`).
+private GitHub Packages registry (`https://maven.pkg.github.com/Quantum-Wind/GaitLib`).
 
 - **Pull requests** build and test every platform. Nothing is published.
 - **Every push to `main`** publishes `com.quantumwind:gaitlib-cpp:<gaitlibVersionBase>.<CI run number>`

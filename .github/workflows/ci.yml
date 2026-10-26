@@ -45,6 +45,24 @@ jobs:
           name: gaitlib-${{ matrix.artifact-name }}
           path: build/outputs/*.zip
 
+  # Unit tests must cover 100% of the library's lines, functions, and branches (see gcovr.cfg).
+  coverage:
+    needs: [validation]
+    name: Coverage
+    runs-on: ubuntu-22.04
+    container: wpilib/ubuntu-base:22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gcovr
+        run: python3 -m pip install gcovr==8.4
+      - name: Enforce 100% coverage
+        run: ./gradlew coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: build/reports/coverage/
+
   # Windows (x86-64 + arm64) and macOS (universal, x86-64 + arm64 slices) build on native runners.
   build-host:
     needs: [validation]
@@ -85,7 +103,7 @@ jobs:
   # and attach the matching GaitLib.json to a GitHub release.
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build-docker, build-host]
+    needs: [build-docker, build-host, coverage]
     name: Publish
     runs-on: ubuntu-22.04
     concurrency: publish
